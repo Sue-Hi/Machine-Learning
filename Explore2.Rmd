@@ -1,0 +1,504 @@
+---
+title: "Exploratory data Analysis of Diabetes Dataset"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+####By: Sue, May 2018
+
+
+
+This study is an exploratery data analysis of Diabetes dataset. For mor
+First read the data and save it into a dataframe.
+```{r}
+setwd("C:/USF/614/ML Project")
+Data <- read.csv("diabetic_data.csv", na.string = "?", header = T)
+str(Data)
+```
+
+It sounds like some columns have many missing values. We take a closer look at them.
+
+
+```{r}
+library(DataExplorer)
+plot_missing(Data)
+
+```
+
+As it can be seen the following columns have lots of NAs:
+Weight
+Medical_specialty
+Payer_code
+Therefore I delet these columns. Also encounter_id and patient_nbr are not needed for the analysis, therefore I delete them as well. Other than the tree columns that are shown there are two columns of Max_glucose and A1c that contain many "None" or basicly NA values. I am not going to delete them. Because of 2 reasons:
+
+1. These variables can be good predictors of length of stay.
+
+2. Even having None for these values can be an indicator of something! As you will see in the future analysis only patients with certain admission or discharge types have this data.
+
+
+```{r}
+Data <- Data[, -c(1, 2, 6,11,12)]
+Data <- na.omit(Data)
+```
+
+
+
+```{r}
+table(Data$A1Cresult)
+table(Data$max_glu_serum)
+table(Data$A1Cresult, Data$max_glu_serum)
+
+```
+
+As we can see there are two classes of variables in this dataset: integer and factors. While most of these columns have right data types folowing columns should be either characters or factors, but they are considered to be integers. We should fix this problem.
+```{r}
+Data$discharge_disposition_id <- as.factor(Data$discharge_disposition_id)
+Data$admission_type_id <- as.factor(Data$admission_type_id)
+Data$admission_source_id <- as.factor(Data$admission_source_id)
+```
+
+##Spliting Data into Training and Test Sets 
+
+Before going any further I want to split the data into training and test sets to prevent leakage of information.
+```{r}
+library(lattice)
+library(caret)
+set.seed(1234)
+trainIndex <- createDataPartition(Data$readmitted, p=0.80, list=FALSE,times=1)
+train_Data <- Data[trainIndex,]
+test_Data <- Data[-trainIndex,]
+
+```
+
+#Some graphs to Explore Training Data
+
+We can take a closer look:
+```{r}
+library(ggplot2)
+library(gridExtra)
+a <- ggplot(data = train_Data) +
+  geom_bar(aes(x=readmitted, fill=readmitted))
+
+b <- ggplot(data = train_Data) +
+  geom_bar(aes(x=time_in_hospital, fill=readmitted))
+
+grid.arrange(a, b, ncol=2)
+
+```
+
+```{r}
+library(ggplot2)
+library(gridExtra)
+a <- ggplot(data = train_Data) +
+  geom_boxplot(aes(x=readmitted, y=time_in_hospital, fill=readmitted)) +
+   scale_fill_brewer(palette="Set3")
+
+b <- ggplot(data = train_Data) +
+  geom_boxplot(aes(x=readmitted, y=num_medications, fill=readmitted)) +
+  scale_fill_brewer(palette="Set2")
+
+c <- ggplot(data = train_Data) +
+  geom_boxplot(aes(x=readmitted, y=number_diagnoses, fill=readmitted)) +
+  scale_fill_brewer(palette="Set1")
+  
+d <- ggplot(data = train_Data) +
+  geom_boxplot(aes(x=readmitted, y=num_lab_procedures, fill=readmitted)) +
+  scale_fill_brewer(palette="Pastel1") 
+  
+e <- ggplot(data = train_Data) +
+  geom_boxplot(aes(x=readmitted, y=num_procedures, fill=readmitted)) +
+  scale_fill_brewer(palette="YlOrRd")   
+  
+f <- ggplot(data = train_Data) +
+  geom_boxplot(aes(x=readmitted, y=number_outpatient, fill=readmitted)) +
+  scale_fill_brewer(palette="BuGn")  
+  
+g <- ggplot(data = train_Data) +
+  geom_boxplot(aes(x=readmitted, y=number_inpatient, fill=readmitted)) +
+  scale_fill_brewer(palette="RdPu")  
+  
+h <- ggplot(data = train_Data) +
+  geom_boxplot(aes(x=readmitted, y=number_emergency, fill=readmitted)) +
+  scale_fill_brewer(palette="BuPu")  
+  
+grid.arrange(a, b, c, d, e,f, g, h, nrow=4, ncol=2)
+
+```
+
+Lots of outliers in number of medications. These variables are not significantly different for different cases of readmision. Time in hospital and number of medication tends to be higher for people who got reaqdmitted in ess than 30 days.
+
+Specifically some relationships can be very interesting. Like:
+
+```{r}
+
+ggplot(data = train_Data,aes(x=readmitted, y=time_in_hospital, fill=race)) +
+  geom_boxplot() +
+   scale_fill_brewer(palette="Set3")+
+  facet_wrap(~ race)
+
+```
+
+As you can see they are almost in the same range. Therefore we cannot say that readmission type, time in hospital and race has any interaction with each other! For more accurate estimate we can do ANOVA test, but as this is not a very important factor in my analysis and also the plot does not show significant differences I am not going to do ANOVA analysis!
+
+
+Now I want to investigate the effects of A1C and Max_Glocose on length of stay and admission type.
+
+```{r}
+
+ggplot(data = train_Data,aes(x=readmitted, y=time_in_hospital, fill=max_glu_serum )) +
+  geom_boxplot() +
+   scale_fill_brewer(palette="Set3")+
+  facet_wrap(~ A1Cresult , ncol=4)
+```
+
+Here we can see the interaction between A1C, max glucose level, type of readmission and time in hospial in just one graph."None" shows missing values.One thing that this graph shows is that people with A1C>8 and 7 and high max glocose level tend to have higher length of saty in hospital and higher odds of <30 readmission.
+
+##ANOVA Test for Investigating Interaction Between Readmission Status, A1C and Max Glucose Level
+
+```{r}
+cort <- aov(time_in_hospital ~ A1Cresult*readmitted, data = Data)
+summary(cort)
+```
+```{r}
+cort <- aov(time_in_hospital ~ max_glu_serum*readmitted, data = Data)
+summary(cort)
+```
+
+ANOVA test shows that there is an interaction between A1C and readmission status but not between max glocose and readmission. I am going to explore it more in predictive analysis section.
+
+##Histograms and Relationship between Numeric variables:
+
+Now I want to explore the relationship between numeric features and also their histogram for different readmission statuses:
+
+```{r}
+library(GGally)
+library(ggplot2)
+ggpairs(Data, columns = c(7:13, 17), aes(colour = readmitted, alpha = 0.4), upper = list(continuous = wrap("cor", size = 2)))
+```
+
+This is a great graph. Shows us:
+
+1. The relationship between different features. 
+
+2. The histogram for each feature. 
+
+3. The correlation coefficients
+
+This figure can give us an idea about outliers. Also distribution of each feature and if there is any strange thing about the data. Like having negative value for features that have to be positive like length of stay in hospital. As you can see there is nothing strange about these features other than some outliers.
+
+Now I want to focus more on correlation coefficients:
+
+##Investigating Linear Correlation Between Quantitative Variables
+
+```{r}
+library(ggcorrplot)
+corr <- round(cor(Data[,c(7:13, 17)]), 1)
+theme_set(theme_gray(base_size = 10))
+ggcorrplot(corr, method = 'circle')
+```
+
+
+As we can see these numeric variables are not very much correlated (at least no linear correlation according to "Pearsone" method!). To find the exact number for correlation and the p-value I use Hmisc package as I cannot get p-values by cor function:
+
+```{r}
+library(survival)
+library(Hmisc)
+cor <- rcorr(as.matrix(Data[,c(7:13, 17)]), type="pearson")
+cor$r
+cor$P
+```
+
+Here you see Pearson correlation coefficients and their p-valuse. Non of these values are high and that shows no "Linear" correlation between these variables!
+
+##Readmission status and Categorical Variables
+
+Is there any relatinship between readmission status and categorical variables? For this purpose I use "GGaly" package to plot a pair graph of these categorical variables:
+
+```{r}
+library(GGally)
+cat_Data <- Data[,c(1:4, 45)]
+ggpairs(cat_Data)
+```
+
+This is very interesting graph. One of the most informative figure is the relationship between age group and readmission (row:5, column:3). It is showing that:
+
+1. Rate of readmission is significantly different for different age groups. The highest rate belongs to the middle age.
+
+2. Readmission status is different for different age groups. In other word age has an interaction with readmission. Ratios of bars are different for three status of readmission and that shows interaction of readmission and age. 
+
+This is also reported by previous studies (Please see the references). I am going to explore effect of age on my predictive analysis later.
+
+Also this figure shows that gender has two levels and the unknown level is almost empty (one observation)! This is also the case with race and admission id. Some levels are almost empty.
+
+##Standardizing the Data
+
+Some models like instance-based models for clustering and SVM work better with standardized data.Therefore I standardize data with "caret" package. To insure no leakage of information between train and test datasets, I apply the model I obtained through "preProcess of train" dataset on train and test datasets separately.
+
+```{r}
+library(caret)
+prep_train_Data <- preProcess(train_Data, method=c("center", "scale"))
+train_Data <- predict(prep_train_Data, train_Data)
+test_Data <- predict(prep_train_Data, test_Data)
+```
+There are 8 truly integer variables in the dataset that I want to play with and discover if there is any relationship between them if I can get good clusters by clustering or if I can get goor principle components (PCs) for future analysis. I first make a dataset of just numeric variables.
+
+```{r}
+numeric_train_Data <- train_Data[,c(7:13, 17, 45)]
+numeric_test_Data <- test_Data[,c(7:13, 17, 45)]
+```
+#Exploratory Data Analysis on Quantitative Features of Training Set
+
+```{r}
+summary(numeric_train_Data)
+```
+
+All numeric parameters are centered and scaled. 
+
+#Unsupervised Learning
+
+##Clustering
+Now that we have an idea about the dataset, I want to do some more analysis: I would like to first do some hierarchical clustering. I do it prior to any other unsupervised analysis because I do not need to make any assumptions for number of clusters. My computer cannot handle dist matrix for the whole training dataset of 80k (it is basicly choosing 2 out of 80k). Almost 6*10^9 points and size of more than 30 Gb. So I make a smaller dataset and explore that.For this purpose I just choose a randome set of 1% of the training data which is almost 800 observation and explore that.
+
+```{r}
+# generating indices:
+set.seed(123)
+n <- round(0.01*nrow(numeric_train_Data))
+sample_index <- sample(1:nrow(numeric_train_Data), n)
+
+# Making a smaller dataset:
+small_numeric_train_Data <- numeric_train_Data[sample_index,]
+```
+##Hierarchical Clustering:
+
+I use the function hcut from factoextra package for this analysis. This package wants number of cut at the begining of the analysis, just for coloring the dendogram! As you will see later Silhouette method sugests k=4 for hierachical clustering. Therefore I will go ahead and choose k=4 for now. However this number is not going to affect the analysis. It is not like Kmean clustering!
+
+Here I use Euclidean method for distance and "ward.D2" method of clustering which are the defauls.
+
+```{r}
+library(factoextra)
+res <- hcut(small_numeric_train_Data[,-9], k = 4, stand = TRUE)
+fviz_dend(res, rect = TRUE)
+```
+##Visualizing the clusters we obtained from Hierarchical Method
+
+```{r}
+fviz_cluster(res, frame.type = "norm", frame.level = 0.68)
+```
+
+#Cluster Validation for Hierarchical Method
+
+##Elbow method
+
+The total WSS measures the compactness of the clustering and we want it to be as small as possible.
+```{r}
+library(NbClust)
+fviz_nbclust(small_numeric_train_Data[,-9], hcut, method = c("wss"))+
+  labs(subtitle = "Elbow method")
+```
+
+As number of clusters increases wss decreases. However this is not our only criteria for a good clustering. I am going to try other method of evaluations that are commenly used by other researchers.
+
+##Average Silhouette Method
+The average silhouette approach measures the quality of a clustering. That is, it determines how well each object lies within its cluster. A high average silhouette width indicates a good clustering.
+
+```{r}
+library(NbClust)
+fviz_nbclust(small_numeric_train_Data[,-9], hcut, method = c("silhouette"))+
+labs(subtitle = "Silhouette method")
+
+```
+
+```{r}
+fviz_silhouette(res)
+```
+
+The silhouette method measures how similar an object is to the other objects in its own cluster versus those in the neighbor cluster. Si values range from 1 to - 1: A value of Si close to 1 indicates that the object is well clustered. In the other words, the object is similar to the other objects in its group. A value of Si close to -1 indicates that the object is poorly clustered, and that assignment to some other cluster would probably improve the overall results. As we can see this method sugests that k=4 is the best, however there are still some observations that are misclustered! Now lets see what the other method of evaluation sugests.
+
+##Gap Statistic Method
+
+The gap statistic compares the total within intra-cluster variation for different values of k with their expected values under null reference distribution of the data. The estimate of the optimal clusters will be value that maximize the gap statistic (i.e, that yields the largest gap statistic). This means that the clustering structure is far away from the random uniform distribution of points.
+```{r}
+library(NbClust)
+set.seed(123)
+fviz_nbclust(small_numeric_train_Data[,-9], hcut, method = c("gap_stat"))+
+  labs(subtitle = "Gap statistic method")
+```
+
+To obtain an ideal clustering, we should select k such that we maximize the gap statistic. Here "Gap statistic method" is sugesting that k= 1 is the best. Therefore no clustering! Or I can say that the data  does not have that much tendancy to cluster based on this method of evaluation! How think we can accept both findings of this method and Silhouette method base on how perfectionist we are!
+
+
+##Kmeans Method
+in which, each cluster is represented by the center or means of the data points belonging to the cluster. The K-means method is sensitive to anomalous data points and outliers.
+
+The K-means method is sensitive to outliers. An alternative to k-means clustering is the K-medoids clustering or PAM (Partitioning Around Medoids, Kaufman & Rousseeuw, 1990), which is less sensitive to outliers compared to k-means.I have also use pam method it gives me almost the same result so I am not going to put it in this document!
+
+```{r}
+library(cluster)
+pam_clust <- pam(small_numeric_train_Data[,-9], 2)
+fviz_cluster(pam_clust, stand = FALSE, geom = "point",
+             frame.type = "norm")
+```
+
+# Cluster Validation
+```{r}
+library(cluster)
+library(factoextra)
+fviz_nbclust(small_numeric_train_Data[,-9],  kmeans, method = "wss") +
+  labs(subtitle = "Elbow method")
+
+# Silhouette method
+fviz_nbclust(small_numeric_train_Data[,-9],  kmeans, method = "silhouette")+
+  labs(subtitle = "Silhouette method")
+
+# Gap statistic
+set.seed(123)
+fviz_nbclust(small_numeric_train_Data[,-9],  kmeans, nstart = 25,  method = "gap_stat", nboot = 50)+
+  labs(subtitle = "Gap statistic method")
+```
+```{r}
+fviz_silhouette(pam_clust)
+```
+
+The result we get are consistant with what we have obtained in previous section.
+
+
+##PCA Analysis
+
+Principal component analysis is used to extract the important information from a multivariate data table and to express this information as a set of few new variables called principal components. PCA method is particularly useful when the variables within the data set are highly correlated. Correlation indicates that there is redundancy in the data. Due to this redundancy, PCA can be used to reduce the original variables into a smaller number of new variables ( = principal components) explaining most of the variance in the original variables.
+
+```{r}
+# library("FactoMineR")
+# res.pca <- PCA(small_numeric_train_Data[,-9], graph = FALSE)
+# fviz_eig(res.pca, addlabels = TRUE, ylim = c(0, 50))
+```
+
+As we can see the first components explain more than 70% of the variance of the data. 
+
+The plot above is also known as variable correlation plots. It shows the relationships between all variables. It can be interpreted as follow:
+Positively correlated variables are grouped together.
+Negatively correlated variables are positioned on opposite sides of the plot origin (opposed quadrants). 
+The distance between variables and the origin measures the quality of the variables on the factor map. Variables that are away from the origin are well represented on the factor map.
+
+```{r}
+set.seed(123)
+pca_model <- prcomp(small_numeric_train_Data[,-9],
+                 center = TRUE,
+                 scale. = TRUE) 
+print(pca_model)
+```
+
+```{r}
+get_eigenvalue(pca_model)
+```
+
+An eigenvalue > 1 indicates that PCs account for more variance than accounted by one of the original variables in standardized data. This is commonly used as a cutoff point for which PCs are retained. This holds true only when the data are standardized. 
+
+You can also limit the number of component to that number that accounts for a certain fraction of the total variance. For example, if you are satisfied with 70% of the total variance explained then use the number of components to achieve that. 
+
+```{r}
+library("FactoMineR")
+fviz_eig(pca_model, addlabels = TRUE, ylim = c(0, 50))
+```
+
+As we can see the first 5 components explain more than 80% of the variance of the data. 
+
+##Correlation Circle
+
+```{r}
+fviz_pca_var(pca_model, col.var = "cos2",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), 
+             repel = TRUE # Avoid text overlapping
+             )
+```
+The plot above is also known as variable correlation plots. It shows the relationships between all variables. It can be interpreted as follow:
+
+* Positively correlated variables are grouped together.
+
+* Negatively correlated variables are positioned on opposite sides of the plot origin (opposed quadrants). 
+
+* The distance between variables and the origin measures the quality of the variables on the factor map. Variables that are away from the origin are well represented on the factor map.
+
+The quality of representation of the variables on factor map is called cos2 (square cosine, squared coordinates).
+
+
+##Contributions of variables to PCs: For feature Selection in Predictive Analysis
+
+The contributions of variables in accounting for the variability in a given principal component are expressed in percentage. 
+Variables that are correlated with PC1 (i.e., Dim.1) and PC2 (i.e., Dim.2) are the most important in explaining the variability in the data set. 
+Variables that do not correlated with any PC or correlated with the last dimensions are variables with low contribution and might be removed to simplify the overall analysis.
+```{r}
+library("corrplot")
+var <- get_pca_var(pca_model)
+corrplot(var$contrib, is.corr=FALSE)
+```
+
+
+As we will see in the predictive analysis later this result is consistant with what we found in Random Forest analysis. Most important factors here are:
+
+* Number of medications
+* Time in hospital
+* Number of diagnosis
+* Number of lab procedures
+
+On the other hand number of outpaitient is not appearing in the first two PCs. I will use these PCs in my predictive analysis to see if I can get a better result.
+
+```{r}
+# Contributions of variables to PC1
+fviz_contrib(pca_model, choice = "var", axes = 1, top = 10)
+# Contributions of variables to PC2
+fviz_contrib(pca_model, choice = "var", axes = 2, top = 10)
+```
+
+As we will see later in predictive analysis these results are consistant with Random Forest ranking of important features. Here the following variables are contributing the most to the first PC:
+
+1. Number of medications
+
+2. Length of stay in hospital
+
+3. Number of lab procedures
+
+##Multiple Correspondence Analysis (MCA) on Categorical Features
+
+The Multiple correspondence analysis (MCA) is method for summarizing and visualizing a data table containing more than two categorical variables. It can also be seen as a generalization of principal component analysis when the variables to be analyzed are categorical instead of quantitative.There are many categorical variables in this dataset. As we will see later including all of them in the predictive analysis is not helping the prediction power of the model. Here I want to see if I can extract some useful information from these categorical data through MCA analysis.
+
+```{r}
+set.seed(123)
+n <- round(0.5*nrow(numeric_train_Data))
+sample_index <- sample(1:nrow(numeric_train_Data), n)
+cat_Data <- Data[sample_index,c(4:6)]
+res.mca <- MCA(cat_Data, graph = FALSE)
+eig.val <- get_eigenvalue(res.mca)
+fviz_screeplot(res.mca, addlabels = TRUE, ylim = c(0, 45))
+
+```
+
+As we can see in the plot, unlike PCA components, these corespondances are not explaining high variance. The first component can only explain 4% of the variance! This tells us that there is not much correlation between the categorical variables and therfore we cannot extract much information through some MCA corespondances. We can try other combinations of categorical variables and see if we can get a satesfactory result.
+
+```{r}
+set.seed(123)
+cat_Data <- cbind(cat_Data, Data[sample_index,c(18, 19:44)])
+res.mca <- MCA(cat_Data, graph = FALSE)
+eig.val <- get_eigenvalue(res.mca)
+fviz_screeplot(res.mca, addlabels = TRUE, ylim = c(0, 45))
+```
+
+
+Again very low variance. I tried many different combinations of categorical data, MCA doesnt work well with any of them. Therefore I am not going to use it. 
+
+#References:
+
+http://www.cioslab.vcu.edu/
+
+http://www.sthda.com/english/articles/26-clustering-basics/86-clustering-distance-measures-essentials/
+
+http://www.sthda.com/english/web/5-bookadvisor/17-practical-guide-to-cluster-analysis-in-r/
+
+http://www.sthda.com/english/articles/29-cluster-validation-essentials/96-determining-the-optimal-number-of-clusters-3-must-know-methods/
+
+http://www.sthda.com/english/wiki/print.php?id=239
+
+http://www.sthda.com/english/articles/25-cluster-analysis-in-r-practical-guide/111-types-of-clustering-methods-overview-and-quick-start-r-code/

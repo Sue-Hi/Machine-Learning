@@ -1,0 +1,323 @@
+---
+title: "Predictive Analysis For Diabetes Dataset: Whole Dataset of More than 100k Observations"
+output:
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+####By: Sue, May 2018
+
+
+
+This analysis is a simple analysis of the whole dataset. I am just going to keep it simple and use Random Forest method. The other two methods of RFE and SVM are very time consuming for this dataset. Here I am just playing with different features to see if I can get better results.
+
+Reading data, save it into Variable called Data and then deleting columns with many NAs and redundant columns (see Exploratory Data Analysis file for more information): 
+```{r message=FALSE}
+setwd("C:/USF/614/ML Project")
+Data <- read.csv("diabetic_data.csv", na.string = "?", header = T)
+Data <- Data[, -c(1, 2, 6,11,12)]
+Data <- na.omit(Data)
+
+```
+
+```{r}
+Data$A1Cresult <- as.character(Data$A1Cresult)
+Data$max_glu_serum <- as.character(Data$max_glu_serum)
+
+```
+Making dummies for the three columns in the data called "diag_1", "diag_2"and "diag_3". Adding diagnoses dummies. These are grouped according to ICD-10 codes. (Please see the reference for more information).
+
+```{r}
+myData_d <- Data
+
+myData_d$diag_circ <- 0
+myData_d$diag_resp <- 0
+myData_d$diag_dig <- 0
+myData_d$diag_diab <- 0
+myData_d$diag_inj <- 0
+myData_d$diag_musc <-0
+myData_d$diag_geni <- 0
+myData_d$diag_neop <-0
+myData_d$diag_other <- 0
+
+myData_d$diag_circ[(as.character( myData_d$diag_1) >= "390" & as.character( myData_d$diag_1) <= "459" |  as.character( myData_d$diag_1 ) == "785")
+                   | (as.character( myData_d$diag_2) >= "390" & as.character( myData_d$diag_2) <= "459" |  as.character( myData_d$diag_2 ) == "785")
+                   | (as.character( myData_d$diag_3) >= "390" & as.character( myData_d$diag_3) <= "459" |  as.character( myData_d$diag_3 ) == "785")] <- 1
+
+#creating diagnosis varible for Diabetes mellitus codes: 250.xx
+
+myData_d$diag_diab[(as.character(myData_d$diag_1) > "249" & as.character(myData_d$diag_1) < "251")
+                   | (as.character(myData_d$diag_2) > "249" & as.character(myData_d$diag_2) < "251")
+                   | (as.character(myData_d$diag_3) > "249" & as.character(myData_d$diag_3) < "251")] <- 1
+
+#creating diagnosis varible for Respiratory codes: 460-519, 786
+
+myData_d$diag_resp[(as.character( myData_d$diag_1) >= "460" & as.character( myData_d$diag_1) <= "519" |  as.character( myData_d$diag_1 ) == "786")
+                   | (as.character( myData_d$diag_2) >= "460" & as.character( myData_d$diag_2) <= "519" |  as.character( myData_d$diag_2 ) == "786")
+                   | (as.character( myData_d$diag_3) >= "460" & as.character( myData_d$diag_3) <= "519" |  as.character( myData_d$diag_3 ) == "786")] <- 1
+
+#creating diagnosis varible for Digestive codes: 520-579, 787
+
+myData_d$diag_dig[(as.character( myData_d$diag_1) >= "520" & as.character( myData_d$diag_1) <= "579" |  as.character( myData_d$diag_1 ) == "787")
+                  | (as.character( myData_d$diag_2) >= "520" & as.character( myData_d$diag_2) <= "579" |  as.character( myData_d$diag_2 ) == "787")
+                  | (as.character( myData_d$diag_3) >= "520" & as.character( myData_d$diag_3) <= "579" |  as.character( myData_d$diag_3 ) == "787")] <- 1
+
+#creating diagnosis varible for Injury codes: 800-999
+
+myData_d$diag_inj[(as.character( myData_d$diag_1) >= "800" & as.character( myData_d$diag_1) <= "999")
+                  | (as.character( myData_d$diag_2) >= "800" & as.character( myData_d$diag_2) <= "999")
+                  | (as.character( myData_d$diag_3) >= "800" & as.character( myData_d$diag_3) <= "999")] <- 1
+
+#creating diagnosis varible for Musculoskeletal codes: 710-739
+
+myData_d$diag_musc[(as.character( myData_d$diag_1) >= "710" & as.character( myData_d$diag_1) <= "739")
+                   | (as.character( myData_d$diag_2) >= "710" & as.character( myData_d$diag_2) <= "739")
+                   | (as.character( myData_d$diag_3) >= "710" & as.character( myData_d$diag_3) <= "739")] <- 1
+
+#creating diagnosis varible for Genitourinary codes: 580-629, 788
+
+myData_d$diag_geni[(as.character( myData_d$diag_1) >= "580" & as.character( myData_d$diag_1) <= "629" |  as.character( myData_d$diag_1 ) == "788")
+                   | (as.character( myData_d$diag_2) >= "580" & as.character( myData_d$diag_2) <= "629" |  as.character( myData_d$diag_2 ) == "788")
+                   | (as.character( myData_d$diag_3) >= "580" & as.character( myData_d$diag_3) <= "629" |  as.character( myData_d$diag_3 ) == "788")] <- 1
+
+#creating diagnosis varible for Neoplasms codes: 140-239
+
+myData_d$diag_neop[(as.character( myData_d$diag_1) >= "140" & as.character( myData_d$diag_1) <= "239")
+                   | (as.character( myData_d$diag_2) >= "140" & as.character( myData_d$diag_2) <= "239")
+                   | (as.character( myData_d$diag_3) >= "140" & as.character( myData_d$diag_3) <= "239")] <- 1
+
+myData_d$diag_other[(as.character( myData_d$diag_1) == "780") | (as.character( myData_d$diag_1) == "781")
+                    | (as.character( myData_d$diag_1) == "784") | (as.character( myData_d$diag_1) >= "790" & as.character( myData_d$diag_1) <= "799")
+                    | (as.character( myData_d$diag_1) >= "240" & as.character( myData_d$diag_1) <= "249") | (as.character( myData_d$diag_1) >= "251" & as.character( myData_d$diag_1) <= "279")
+                    | (as.character( myData_d$diag_1) >= "680" & as.character( myData_d$diag_1) <= "709") | (as.character( myData_d$diag_1) == "782") 
+                    | (as.character( myData_d$diag_1) >= "001" & as.character( myData_d$diag_1) <= "139") | (as.character( myData_d$diag_1) >= "290" & as.character( myData_d$diag_1) <= "319")
+                    | (as.character( myData_d$diag_1) >= "280" & as.character( myData_d$diag_1) <= "289") | (as.character( myData_d$diag_1) >= "320" & as.character( myData_d$diag_1) <= "359")
+                    | (as.character( myData_d$diag_1) >= "630" & as.character( myData_d$diag_1) <= "679") | (as.character( myData_d$diag_1) >= "360" & as.character( myData_d$diag_1) <= "389")
+                    | (as.character( myData_d$diag_1) >= "740" & as.character( myData_d$diag_1) <= "759")
+                    | (startsWith(as.character( myData_d$diag_1), 'E'))
+                    | (startsWith(as.character( myData_d$diag_1), 'V'))
+                    | (as.character( myData_d$diag_2) == "780") | (as.character( myData_d$diag_2) == "781")
+                    | (as.character( myData_d$diag_2) == "784") | (as.character( myData_d$diag_2) >= "790" & as.character( myData_d$diag_2) <= "799")
+                    | (as.character( myData_d$diag_2) >= "240" & as.character( myData_d$diag_2) <= "249") | (as.character( myData_d$diag_2) >= "251" & as.character( myData_d$diag_2) <= "279")
+                    | (as.character( myData_d$diag_2) >= "680" & as.character( myData_d$diag_2) <= "709") | (as.character( myData_d$diag_2) == "782") 
+                    | (as.character( myData_d$diag_2) >= "001" & as.character( myData_d$diag_2) <= "139") | (as.character( myData_d$diag_2) >= "290" & as.character( myData_d$diag_2) <= "319")
+                    | (as.character( myData_d$diag_2) >= "280" & as.character( myData_d$diag_2) <= "289") | (as.character( myData_d$diag_2) >= "320" & as.character( myData_d$diag_2) <= "359")
+                    | (as.character( myData_d$diag_2) >= "630" & as.character( myData_d$diag_2) <= "679") | (as.character( myData_d$diag_2) >= "360" & as.character( myData_d$diag_2) <= "389")
+                    | (as.character( myData_d$diag_2) >= "740" & as.character( myData_d$diag_2) <= "759")
+                    | (startsWith(as.character( myData_d$diag_2), 'E')) 
+                    | (startsWith(as.character( myData_d$diag_2), 'V'))
+                    | (as.character( myData_d$diag_3) == "780") | (as.character( myData_d$diag_3) == "781")
+                    | (as.character( myData_d$diag_3) == "784") | (as.character( myData_d$diag_3) >= "790" & as.character( myData_d$diag_3) <= "799")
+                    | (as.character( myData_d$diag_3) >= "240" & as.character( myData_d$diag_3) <= "249") | (as.character( myData_d$diag_3) >= "251" & as.character( myData_d$diag_3) <= "279")
+                    | (as.character( myData_d$diag_3) >= "680" & as.character( myData_d$diag_3) <= "709") | (as.character( myData_d$diag_3) == "782")
+                    | (as.character( myData_d$diag_3) >= "001" & as.character( myData_d$diag_3) <= "139") | (as.character( myData_d$diag_3) >= "290" & as.character( myData_d$diag_3) <= "319")
+                    | (as.character( myData_d$diag_3) >= "280" & as.character( myData_d$diag_3) <= "289") | (as.character( myData_d$diag_3) >= "320" & as.character( myData_d$diag_3) <= "359")
+                    | (as.character( myData_d$diag_3) >= "630" & as.character( myData_d$diag_3) <= "679") | (as.character( myData_d$diag_3) >= "360" & as.character( myData_d$diag_3) <= "389")
+                    | (as.character( myData_d$diag_3) >= "740" & as.character( myData_d$diag_3) <= "759")
+                    | (startsWith(as.character( myData_d$diag_3), 'E')) 
+                    | (startsWith(as.character( myData_d$diag_3), 'V'))] <- 1
+
+Data <- myData_d
+```
+
+Making dummies for discharge disposition, admission type and admission source. Also researchers have found that three age groups are important in readmission rate. I am making dummies based on their findings. (Please see References section for more information)
+```{r}
+#################
+mydata1 <- Data
+
+# Data cleaning
+##discharge dispo id - 6 levels rather than 29
+mydata1$discharge_disposition_id <- as.factor(mydata1$discharge_disposition_id)
+levels(mydata1$discharge_disposition_id)[levels(mydata1$discharge_disposition_id) == "1"] <- "1"
+levels(mydata1$discharge_disposition_id)[levels(mydata1$discharge_disposition_id) == "2" |
+                                           levels(mydata1$discharge_disposition_id) == "3" |
+                                           levels(mydata1$discharge_disposition_id) == "4" |
+                                           levels(mydata1$discharge_disposition_id) == "5" |
+                                           levels(mydata1$discharge_disposition_id) == "9" |
+                                           levels(mydata1$discharge_disposition_id) == "10" |
+                                           levels(mydata1$discharge_disposition_id) == "12" |
+                                           levels(mydata1$discharge_disposition_id) == "15" |
+                                           levels(mydata1$discharge_disposition_id) == "16" |
+                                           levels(mydata1$discharge_disposition_id) == "17" |
+                                           levels(mydata1$discharge_disposition_id) == "22" |
+                                           levels(mydata1$discharge_disposition_id) == "23" |
+                                           levels(mydata1$discharge_disposition_id) == "24" |
+                                           levels(mydata1$discharge_disposition_id) == "27" |
+                                           levels(mydata1$discharge_disposition_id) == "28" |
+                                           levels(mydata1$discharge_disposition_id) == "29" |
+                                           levels(mydata1$discharge_disposition_id) == "30" ] <- "2"
+levels(mydata1$discharge_disposition_id)[levels(mydata1$discharge_disposition_id) == "7"] <- "3"
+levels(mydata1$discharge_disposition_id)[levels(mydata1$discharge_disposition_id) == "6" |
+                                           levels(mydata1$discharge_disposition_id) == "8" |
+                                           levels(mydata1$discharge_disposition_id) == "13" |
+                                           levels(mydata1$discharge_disposition_id) == "14" ] <- "4"
+levels(mydata1$discharge_disposition_id)[levels(mydata1$discharge_disposition_id) == "11" |
+                                           levels(mydata1$discharge_disposition_id) == "19" |
+                                           levels(mydata1$discharge_disposition_id) == "20" |
+                                           levels(mydata1$discharge_disposition_id) == "21" ] <- "5"
+levels(mydata1$discharge_disposition_id)[levels(mydata1$discharge_disposition_id) == "18" |
+                                           levels(mydata1$discharge_disposition_id) == "25" |
+                                           levels(mydata1$discharge_disposition_id) == "26" ] <- "6"
+
+#recode admission type (factor --> recast columns) - 5 rather than 8
+mydata1$admission_type_id <- as.factor(mydata1$admission_type_id)
+levels(mydata1$admission_type_id)[levels(mydata1$admission_type_id) == "2" |
+                                    levels(mydata1$admission_type_id) == "1" ] <- "1"
+levels(mydata1$admission_type_id)[levels(mydata1$admission_type_id)== "3"] <- "2"
+levels(mydata1$admission_type_id)[levels(mydata1$admission_type_id)== "4"] <- "3"
+levels(mydata1$admission_type_id)[levels(mydata1$admission_type_id)== "5" |
+                                    levels(mydata1$admission_type_id)== "6" |
+                                    levels(mydata1$admission_type_id)== "8"] <- "4"
+levels(mydata1$admission_type_id)[levels(mydata1$admission_type_id)== "7"] <- "5"
+
+# Admission_source_id 
+mydata1$admission_source_id <- as.factor(mydata1$admission_source_id)
+levels(mydata1$admission_source_id)[levels(mydata1$admission_source_id) == "1"] <- "1"
+levels(mydata1$admission_source_id)[levels(mydata1$admission_source_id) == "2"] <- "2"
+levels(mydata1$admission_source_id)[levels(mydata1$admission_source_id) == "3"] <- "3"
+levels(mydata1$admission_source_id)[levels(mydata1$admission_source_id) == "4" |
+                                      levels(mydata1$admission_source_id) == "5" | 
+                                      levels(mydata1$admission_source_id) == "6" |
+                                      levels(mydata1$admission_source_id) == "10" |
+                                      levels(mydata1$admission_source_id) == "22" |
+                                      levels(mydata1$admission_source_id) == "25" ]<- "4"
+levels(mydata1$admission_source_id)[levels(mydata1$admission_source_id) == "7"]  <- "5"
+levels(mydata1$admission_source_id)[levels(mydata1$admission_source_id) == "8"] <- "6"
+levels(mydata1$admission_source_id)[levels(mydata1$admission_source_id) == "9" |
+                                      levels(mydata1$admission_source_id) == "17" |
+                                      levels(mydata1$admission_source_id) == "20" ] <- "7"
+levels(mydata1$admission_source_id)[levels(mydata1$admission_source_id) == "11" |
+                                      levels(mydata1$admission_source_id) == "13" |
+                                      levels(mydata1$admission_source_id) == "14" ] <- "8"
+
+# Recast age column with factor with 4 levels:
+levels(mydata1$age)[levels(mydata1$age) == "[0-10)" | 
+                      levels(mydata1$age) == "[10-20)" | 
+                      levels(mydata1$age) == "[20-30)"] <- 1
+levels(mydata1$age)[levels(mydata1$age) == "[30-40)" | 
+                      levels(mydata1$age) == "[40-50)" | 
+                      levels(mydata1$age) == "[50-60)" |
+                      levels(mydata1$age) == "[60-70)"] <- 2
+levels(mydata1$age)[ levels(mydata1$age) == "[70-80)" | 
+                      levels(mydata1$age) == "[80-90)"|
+                      levels(mydata1$age) == "[90-100)"] <- 3
+
+
+
+
+Data <- mydata1 
+```
+
+Converting variables that are by mistake integers or the one that are character to factors. 
+```{r}
+library(caret)
+Data$discharge_disposition_id <- as.factor(Data$discharge_disposition_id)
+Data$admission_type_id <- as.factor(Data$admission_type_id)
+Data$A1Cresult <- as.factor(Data$A1Cresult)
+Data$max_glu_serum <- as.factor(Data$max_glu_serum)
+Data$admission_source_id <- as.factor(Data$admission_source_id)
+```
+
+##Removing Some Columns from the Dataset to Improve Prediction Power of the Model
+
+My analysis showes that removing the following two columns:
+
+* change: which shows change in medication
+
+* diabetesMed
+
+improves the results. This is true for all subsets of data that I have worked with. It can be because of the correlation between these two variables and the 24 medication features in the dataset. 
+
+```{r}
+Data <- Data[, -c(14:16, 40, 41)]
+```
+
+##Making Binery Responces
+
+Here I convert the "readmitted" column to two columns of:
+
+* "YES" for (readmitted = "<30") and ("readmitted = >30") 
+
+* "NO" for "readmitted = NO" 
+
+This way we have a more balanced response column.
+
+```{r}
+Data$readmitted <- as.character(Data$readmitted)
+for(i in 1:length(Data$readmitted)){
+  if(Data$readmitted[i] == '>30' | Data$readmitted[i] == '<30'){
+    Data$readmitted[i] <- 'YES'
+  }
+}
+Data$readmitted <- as.character(Data$readmitted)
+Data$readmitted <- as.factor(Data$readmitted)
+print("Frequency of Response:")
+table(Data$readmitted)
+```
+##Partitioning the Data Using Caret Package
+
+I am using the ratio of 70/30. I have tried different ratios of 50/50, 60/40, 70/30 and 80/20. All give me almost the same results. I think this is because the dataset is very large so in any case the we have enough data to train the model.
+
+```{r}
+set.seed(123)
+trainIndex <- createDataPartition(Data$readmitted, p=0.7, list=FALSE, times=1)
+train_Data <- Data[trainIndex,]
+test_Data <- Data[-trainIndex,]
+```
+##Random Forest
+
+The only method I am using on this dataset is Random Forest. I am using this method because of the following reasons:
+
+1. very powerful method that can work with all types of data (quantitative and categorical). 
+
+2. It helps me with feature selection by automaticly ranking the features based on their importanc (Gini),
+
+3. I have tried SVM on this dataset and subsets of it. SVM is very time consuming and its performance is always 2-3% below Random Forest.
+
+4. I have also tried logistic regression but again its performance is always lower than Random Forest and SVM.
+
+Therfore I just show the Random Forest result here. For Random Forest I have tried different number of trees. The prediction of the model doesn't improve after a thresold (ntree = 500). Therefore I use ntree = 500. I have also used resampling with and without replacement and their performances are the same.
+
+```{r message=FALSE}
+library(randomForest)
+library(pROC)
+library(caret)
+library(SDMTools)
+set.seed(123)
+
+ran_for <- randomForest(formula = readmitted ~ .,
+                        data = train_Data,
+                        ntree = 500,
+                        replace = TRUE)
+
+pred <- predict(ran_for, test_Data[,-40], type = 'prob', decision.value = T)
+pred_con <- predict(ran_for, test_Data[,-40], decision.value = T)
+CC <- caret::confusionMatrix(pred_con, test_Data$readmitted)
+CC
+F1_Score <- 2*(CC$byClass[[5]]* CC$byClass[[6]])/ (CC$byClass[[5]] + CC$byClass[[6]])
+F1_Score
+s <- smooth(roc(test_Data$readmitted, pred[,1], auc = T))
+plot(s, print.auc=TRUE, max.auc.polygon=TRUE, auc.polygon.col="blue", print.thres=TRUE)
+varImpPlot(ran_for, main = "Importance of Features")
+```
+
+AUC of 71% is the highest I can get with the whole dataset and these features. With this dataset the analysis shows that nomber of lab procedures, medication and length of stay are the most important features respectivly.
+
+
+#References:
+
+http://www.cioslab.vcu.edu/
+
+https://usf-mshi.slack.com/files/U82DK0HC1/FAMS6EZ7F/screen_shot_2018-05-10_at_10.18.16_am.png
+
+https://www.hcup-us.ahrq.gov/reports/statbriefs/sb230-7-Day-Versus-30-Day-Readmissions.jsp
+
+https://usf-mshi.slack.com/files/U82DK0HC1/FAMN2UDNW/screen_shot_2018-05-10_at_10.14.23_am.png
+
+https://www.hindawi.com/journals/bmri/2014/781670/
+
+
+
+

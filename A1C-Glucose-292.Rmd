@@ -1,0 +1,667 @@
+---
+title: "Predictive Analysis For Diabetes Dataset: Subset with No Missing Values for A1C and Max Glucose Level"
+output:
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+####By: Sue, May 2018
+
+
+
+This analysis is on a small subset of data. In this subset all observations have the data for "max glocose level" and "A1C. The perpus of this analysis is:
+
+1. I want to have a clean and small dataset to practice many different ML methods!
+
+2. To investigate power of my models' prediction in the presence of all important features in predicting readmission status for diabetics.
+
+#Data Preperation
+
+Reading data, save it into variable called Data and then deleting columns with high level of NAs and redundant columns as explained in exploratery data analysis: 
+```{r message=FALSE}
+setwd("C:/USF/614/ML Project")
+Data <- read.csv("diabetic_data.csv", na.string = "?", header = T)
+Data <- Data[, -c(1, 2, 6,11,12)]
+
+```
+For this analysis I only use patients with the information for A1C and max glucose level. In this dataset we just have 298 observations.
+
+```{r message=FALSE}
+Data <- Data[!Data$max_glu_serum == "None", ]
+Data <- Data[!Data$A1Cresult == "None", ]
+Data$A1Cresult <- as.character(Data$A1Cresult)
+Data$max_glu_serum <- as.character(Data$max_glu_serum)
+
+```
+#Feature Selection
+Making some dummies and changing variables that are by mistake integers to factors. I am converting all categorical variables except medications, to dummies. I tried adding medication dummies to the model, however it made the result worse. From all the categorical features that I have in this dataset I am just including the following now:
+
+* Max glucose level
+
+* A1C
+
+* Discharge Disposition ID
+
+* Admission Type ID
+
+* Admission source ID
+
+The reason I chose these is that Max glocose level and A1C can play an important role and the other 3 are found to be very important in other studies. (Please see the Reference section)
+
+```{r message=FALSE}
+library(caret)
+Data$discharge_disposition_id <- as.factor(Data$discharge_disposition_id)
+Data$admission_type_id <- as.factor(Data$admission_type_id)
+Data$A1Cresult <- as.factor(Data$A1Cresult)
+Data$max_glu_serum <- as.factor(Data$max_glu_serum)
+Data$admission_source_id <- as.factor(Data$admission_source_id)
+d1 <- predict(dummyVars(~discharge_disposition_id, data = Data), newdata = Data)
+d2 <- predict(dummyVars(~admission_type_id, data = Data), newdata = Data)
+d3 <- predict(dummyVars(~max_glu_serum, data = Data), newdata = Data)
+d4 <- predict(dummyVars(~A1Cresult, data = Data), newdata = Data)
+d5 <- predict(dummyVars(~admission_source_id, data = Data), newdata = Data)
+```
+
+Changing name of columns in some dummies.
+```{r message=FALSE}
+colnames(d3) <- c("max_glu_serum.200", "max_glu_serum.300", "max_glu_serum.Norm")
+colnames(d4) <- c("A1Cresult.7", "A1Cresult.8", "A1Cresult.Norm")
+```
+Adding diagnoses dummies. These are grouped according to ICD codes.
+
+```{r message=FALSE}
+myData_d <- Data
+
+myData_d$diag_circ <- 0
+myData_d$diag_resp <- 0
+myData_d$diag_dig <- 0
+myData_d$diag_diab <- 0
+myData_d$diag_inj <- 0
+myData_d$diag_musc <-0
+myData_d$diag_geni <- 0
+myData_d$diag_neop <-0
+myData_d$diag_other <- 0
+
+myData_d$diag_circ[(as.character( myData_d$diag_1) >= "390" & as.character( myData_d$diag_1) <= "459" |  as.character( myData_d$diag_1 ) == "785")
+                   | (as.character( myData_d$diag_2) >= "390" & as.character( myData_d$diag_2) <= "459" |  as.character( myData_d$diag_2 ) == "785")
+                   | (as.character( myData_d$diag_3) >= "390" & as.character( myData_d$diag_3) <= "459" |  as.character( myData_d$diag_3 ) == "785")] <- 1
+
+#creating diagnosis varible for Diabetes mellitus codes: 250.xx
+
+myData_d$diag_diab[(as.character(myData_d$diag_1) > "249" & as.character(myData_d$diag_1) < "251")
+                   | (as.character(myData_d$diag_2) > "249" & as.character(myData_d$diag_2) < "251")
+                   | (as.character(myData_d$diag_3) > "249" & as.character(myData_d$diag_3) < "251")] <- 1
+
+#creating diagnosis varible for Respiratory codes: 460-519, 786
+
+myData_d$diag_resp[(as.character( myData_d$diag_1) >= "460" & as.character( myData_d$diag_1) <= "519" |  as.character( myData_d$diag_1 ) == "786")
+                   | (as.character( myData_d$diag_2) >= "460" & as.character( myData_d$diag_2) <= "519" |  as.character( myData_d$diag_2 ) == "786")
+                   | (as.character( myData_d$diag_3) >= "460" & as.character( myData_d$diag_3) <= "519" |  as.character( myData_d$diag_3 ) == "786")] <- 1
+
+#creating diagnosis varible for Digestive codes: 520-579, 787
+
+myData_d$diag_dig[(as.character( myData_d$diag_1) >= "520" & as.character( myData_d$diag_1) <= "579" |  as.character( myData_d$diag_1 ) == "787")
+                  | (as.character( myData_d$diag_2) >= "520" & as.character( myData_d$diag_2) <= "579" |  as.character( myData_d$diag_2 ) == "787")
+                  | (as.character( myData_d$diag_3) >= "520" & as.character( myData_d$diag_3) <= "579" |  as.character( myData_d$diag_3 ) == "787")] <- 1
+
+#creating diagnosis varible for Injury codes: 800-999
+
+myData_d$diag_inj[(as.character( myData_d$diag_1) >= "800" & as.character( myData_d$diag_1) <= "999")
+                  | (as.character( myData_d$diag_2) >= "800" & as.character( myData_d$diag_2) <= "999")
+                  | (as.character( myData_d$diag_3) >= "800" & as.character( myData_d$diag_3) <= "999")] <- 1
+
+#creating diagnosis varible for Musculoskeletal codes: 710-739
+
+myData_d$diag_musc[(as.character( myData_d$diag_1) >= "710" & as.character( myData_d$diag_1) <= "739")
+                   | (as.character( myData_d$diag_2) >= "710" & as.character( myData_d$diag_2) <= "739")
+                   | (as.character( myData_d$diag_3) >= "710" & as.character( myData_d$diag_3) <= "739")] <- 1
+
+#creating diagnosis varible for Genitourinary codes: 580-629, 788
+
+myData_d$diag_geni[(as.character( myData_d$diag_1) >= "580" & as.character( myData_d$diag_1) <= "629" |  as.character( myData_d$diag_1 ) == "788")
+                   | (as.character( myData_d$diag_2) >= "580" & as.character( myData_d$diag_2) <= "629" |  as.character( myData_d$diag_2 ) == "788")
+                   | (as.character( myData_d$diag_3) >= "580" & as.character( myData_d$diag_3) <= "629" |  as.character( myData_d$diag_3 ) == "788")] <- 1
+
+#creating diagnosis varible for Neoplasms codes: 140-239
+
+myData_d$diag_neop[(as.character( myData_d$diag_1) >= "140" & as.character( myData_d$diag_1) <= "239")
+                   | (as.character( myData_d$diag_2) >= "140" & as.character( myData_d$diag_2) <= "239")
+                   | (as.character( myData_d$diag_3) >= "140" & as.character( myData_d$diag_3) <= "239")] <- 1
+
+
+myData_d$diag_other[(as.character( myData_d$diag_1) == "780") | (as.character( myData_d$diag_1) == "781")
+                    | (as.character( myData_d$diag_1) == "784") | (as.character( myData_d$diag_1) >= "790" & as.character( myData_d$diag_1) <= "799")
+                    | (as.character( myData_d$diag_1) >= "240" & as.character( myData_d$diag_1) <= "249") | (as.character( myData_d$diag_1) >= "251" & as.character( myData_d$diag_1) <= "279")
+                    | (as.character( myData_d$diag_1) >= "680" & as.character( myData_d$diag_1) <= "709") | (as.character( myData_d$diag_1) == "782") 
+                    | (as.character( myData_d$diag_1) >= "001" & as.character( myData_d$diag_1) <= "139") | (as.character( myData_d$diag_1) >= "290" & as.character( myData_d$diag_1) <= "319")
+                    | (as.character( myData_d$diag_1) >= "280" & as.character( myData_d$diag_1) <= "289") | (as.character( myData_d$diag_1) >= "320" & as.character( myData_d$diag_1) <= "359")
+                    | (as.character( myData_d$diag_1) >= "630" & as.character( myData_d$diag_1) <= "679") | (as.character( myData_d$diag_1) >= "360" & as.character( myData_d$diag_1) <= "389")
+                    | (as.character( myData_d$diag_1) >= "740" & as.character( myData_d$diag_1) <= "759")
+                    | (startsWith(as.character( myData_d$diag_1), 'E'))
+                    | (startsWith(as.character( myData_d$diag_1), 'V'))
+                    | (as.character( myData_d$diag_2) == "780") | (as.character( myData_d$diag_2) == "781")
+                    | (as.character( myData_d$diag_2) == "784") | (as.character( myData_d$diag_2) >= "790" & as.character( myData_d$diag_2) <= "799")
+                    | (as.character( myData_d$diag_2) >= "240" & as.character( myData_d$diag_2) <= "249") | (as.character( myData_d$diag_2) >= "251" & as.character( myData_d$diag_2) <= "279")
+                    | (as.character( myData_d$diag_2) >= "680" & as.character( myData_d$diag_2) <= "709") | (as.character( myData_d$diag_2) == "782") 
+                    | (as.character( myData_d$diag_2) >= "001" & as.character( myData_d$diag_2) <= "139") | (as.character( myData_d$diag_2) >= "290" & as.character( myData_d$diag_2) <= "319")
+                    | (as.character( myData_d$diag_2) >= "280" & as.character( myData_d$diag_2) <= "289") | (as.character( myData_d$diag_2) >= "320" & as.character( myData_d$diag_2) <= "359")
+                    | (as.character( myData_d$diag_2) >= "630" & as.character( myData_d$diag_2) <= "679") | (as.character( myData_d$diag_2) >= "360" & as.character( myData_d$diag_2) <= "389")
+                    | (as.character( myData_d$diag_2) >= "740" & as.character( myData_d$diag_2) <= "759")
+                    | (startsWith(as.character( myData_d$diag_2), 'E')) 
+                    | (startsWith(as.character( myData_d$diag_2), 'V'))
+                    | (as.character( myData_d$diag_3) == "780") | (as.character( myData_d$diag_3) == "781")
+                    | (as.character( myData_d$diag_3) == "784") | (as.character( myData_d$diag_3) >= "790" & as.character( myData_d$diag_3) <= "799")
+                    | (as.character( myData_d$diag_3) >= "240" & as.character( myData_d$diag_3) <= "249") | (as.character( myData_d$diag_3) >= "251" & as.character( myData_d$diag_3) <= "279")
+                    | (as.character( myData_d$diag_3) >= "680" & as.character( myData_d$diag_3) <= "709") | (as.character( myData_d$diag_3) == "782")
+                    | (as.character( myData_d$diag_3) >= "001" & as.character( myData_d$diag_3) <= "139") | (as.character( myData_d$diag_3) >= "290" & as.character( myData_d$diag_3) <= "319")
+                    | (as.character( myData_d$diag_3) >= "280" & as.character( myData_d$diag_3) <= "289") | (as.character( myData_d$diag_3) >= "320" & as.character( myData_d$diag_3) <= "359")
+                    | (as.character( myData_d$diag_3) >= "630" & as.character( myData_d$diag_3) <= "679") | (as.character( myData_d$diag_3) >= "360" & as.character( myData_d$diag_3) <= "389")
+                    | (as.character( myData_d$diag_3) >= "740" & as.character( myData_d$diag_3) <= "759")
+                    | (startsWith(as.character( myData_d$diag_3), 'E')) 
+                    | (startsWith(as.character( myData_d$diag_3), 'V'))] <- 1
+
+Data <- myData_d
+```
+Finally making the dataset I want to work on by adding all Numeric columns and dummies and the response variable which is "readmitted" column:
+
+```{r message=FALSE}
+Data <- Data[, c(7:13, 17, 45:54)]
+Data <- cbind(Data, d1, d2, d3, d4, d5) #, d6, d7, d8, d9, d10)
+Data <- na.omit(Data)
+```
+Making binery responses. Here I convert the "readmitted" column to two columns of:
+
+* "YES" for "<30" and ">30" of readmission status
+
+* "NO" for "NO" readmission
+
+This way we have a more balanced columns for responces:
+
+```{r message=FALSE}
+Data$readmitted <- as.character(Data$readmitted)
+for(i in 1:length(Data$readmitted)){
+  if(Data$readmitted[i] == '>30' | Data$readmitted[i] == '<30'){
+    Data$readmitted[i] <- 'YES'
+  }
+}
+Data$readmitted <- as.character(Data$readmitted)
+Data$readmitted <- as.factor(Data$readmitted)
+table(Data$readmitted)
+```
+#Partitioning the Data Using Caret Package:
+
+```{r message=FALSE}
+set.seed(123)
+trainIndex <- createDataPartition(Data$readmitted, p=0.8, list=FALSE, times=1)
+train_Data <- Data[trainIndex,]
+test_Data <- Data[-trainIndex,]
+```
+Before starting the analysis, I want to make some placeholders to save results of the performances of models:
+
+```{r message=FALSE}
+Random_Forest <- rep(NA, 4)
+Logistic_Regression <- rep(NA, 4)
+Linear_SVM <- rep(NA, 4)
+```
+#Random Forest
+
+The first method I am going to use is Random Forest. I am trying this method first because of two reasons:
+
+1. RF is a very powerful method that can work with all types of data (quantitative and categorical). Although I do not have to be worried about type of the data as I made all categorical variables into dummies.
+
+2. It helps me with feature selection by automaticly ranking the features based on their importanc (Gini).
+
+3. I can do Recursive Feature Elimination "RFE"" using this method.
+
+For this dataset ntree = 500 works better and the perfromance gets worse as ntree increases beyond this number. I think that is because we do not have many observations (only 292).
+
+```{r message=FALSE}
+library(randomForest)
+library(pROC)
+set.seed(123)
+
+ran_for <- randomForest(formula = readmitted ~ .,
+                        
+                        data = train_Data,
+                        
+                        ntree = 500 )
+
+pred <- predict(ran_for, test_Data[,-9], type = 'prob')
+Random_Forest[1] <- auc(test_Data$readmitted, pred[,1])
+pred_con <- predict(ran_for, test_Data[,-9], decision.value = T)
+CC <- caret::confusionMatrix(pred_con, test_Data$readmitted)
+CC
+F1_Score <- 2*(CC$byClass[[5]]* CC$byClass[[6]])/ (CC$byClass[[5]] + CC$byClass[[6]])
+F1_Score
+s <- (roc(test_Data$readmitted, pred[,1], auc = T))
+plot(s, print.auc=TRUE, max.auc.polygon=TRUE, auc.polygon.col="blue", print.thres=TRUE)
+varImp(ran_for)
+varImpPlot(ran_for)
+```
+
+As you can see Area Under the Curve (AUC) is almost 73%. you can also see the result of confusion matrix, sensitivity, specificity and the rest of the statistics for cutoff = 0.5 which is the default cutoff.
+
+#Feature Selection Using Recursive Feature Elimination with Random Forest Method
+Now I want to do some Recursive Feature Elimination with randomforest and caret package:
+```{r message=FALSE}
+library(caret)
+library(mlbench)
+library(Hmisc)
+library(randomForest)
+set.seed(1234)
+ctrl <- rfeControl(functions = rfFuncs,
+                   method = "repeatedcv",
+                   repeats = 5,
+                   verbose = FALSE)
+    
+subsets <- c(1:5, 10, 15, 20, 25, 38)
+rfProfile <- rfe(train_Data[,-9], train_Data[,9],
+                 sizes = subsets,
+                 metric = "ROC",
+                 maximize = T,
+                 rfeControl = ctrl)
+
+rfProfile
+predictors(rfProfile)
+```
+```{r message=FALSE}
+trellis.par.set(caretTheme())
+plot1 <- plot(rfProfile, type = c("g", "o"))
+print(plot1)
+```
+Here you see the graph of the accuracy that RF-RFE obtains through Cross-validation. As you can see the combination of 10 different variables gives us the highest accuracy. I tried to force this model to use "AUC" as a criteria, however it doesn't work with that. The model also provides us with the list of the 10 features.
+
+In the next step I am just going to use these features totrain my model. I want to see how this will improve the AUC and acuracy of the model.
+
+##Performing Random Forest with Selected Features
+```{r message=FALSE}
+ rec_train_Data <- train_Data[,c( "discharge_disposition_id.2", "number_inpatient", "discharge_disposition_id.11", "number_emergency", "num_medications", "time_in_hospital", "number_outpatient", "admission_source_id.1", "admission_source_id.7", "A1Cresult.Norm", "readmitted")]
+
+
+set.seed(1234)
+
+ran_for <- randomForest(formula = readmitted ~ .,
+                        
+                        data = rec_train_Data,
+                        
+                        ntree = 500 )
+
+pred <- predict(ran_for, test_Data[,-9], type = 'prob')
+Random_Forest[2] <- auc(test_Data$readmitted, pred[,1])
+pred_con <- predict(ran_for, test_Data[,-9], decision.value = T)
+CC <- caret::confusionMatrix(pred_con, test_Data$readmitted)
+CC
+F1_Score <- 2*(CC$byClass[[5]]* CC$byClass[[6]])/ (CC$byClass[[5]] + CC$byClass[[6]])
+F1_Score
+s <- (roc(test_Data$readmitted, pred[,1]))
+plot(s, print.auc=TRUE, max.auc.polygon=TRUE, auc.polygon.col="blue", print.thres=TRUE)
+varImp(ran_for)
+varImpPlot(ran_for)
+```
+
+We can see that feature selection can highly improve model performance. It improves AUC of RF prediction by more than 3%!
+
+#Performing Logistic Regression 
+```{r message=FALSE}
+set.seed(123)
+
+logistic_model <- glm(formula =  readmitted ~ .,
+                      
+                      family = binomial(link = "logit"),
+                      
+                      data = train_Data)
+
+
+pred <- predict(logistic_model, test_Data[,-9], type="response")
+Logistic_Regression[1] <- auc(test_Data$readmitted, pred)
+s <- (roc(test_Data$readmitted, pred))
+plot(s, print.auc=TRUE, max.auc.polygon=TRUE, auc.polygon.col="blue", print.thres=TRUE)
+```
+Logistic regression is not performing as well as RF and I expected that.
+
+#Performing Logistic Regression with Selected Features
+```{r message=FALSE}
+set.seed(123)
+
+logistic_model <- glm(formula =  readmitted ~ .,
+                      
+                      family = binomial(link = "logit"),
+                      
+                      data = rec_train_Data)
+
+
+pred <- predict(logistic_model, test_Data[,-9], type="response")
+Logistic_Regression[2] <- auc(test_Data$readmitted, pred)
+s <- (roc(test_Data$readmitted, pred))
+plot(s, print.auc=TRUE, max.auc.polygon=TRUE, auc.polygon.col="blue", print.thres=TRUE)
+```
+We can see that feature selection has even greater affect on logistic regression!It is improving AUC by more than 6%.
+
+#Standardizing the Data for SVM Model
+
+For some methods it is required to standardize the data. Here I standardize the numerical columns using "caret" package. For this I am not including my dummies because it gives me some strange results! So I train the preprocess function on train set and then will use the same trained model on my test dataset.
+
+```{r message=FALSE}
+library(caret)
+
+#train data:
+int_train_Data <- train_Data[,1:8]
+prep_train_Data <- preProcess(int_train_Data, method=c("center", "scale"))
+int_train_Data <- predict(prep_train_Data, int_train_Data)
+train_Data <- cbind(int_train_Data,  train_Data[,9:40])
+
+#Prepare test data using the function we obtained from train data
+int_test_Data <- test_Data[,1:8]
+int_test_Data <- predict(prep_train_Data, int_test_Data)
+test_Data <- cbind(int_test_Data,  test_Data[,9:40])
+```
+
+##SVM Model
+
+I have tried linear, polynomial and radial kernel and linear model yields the best results. 
+```{r message=FALSE}
+set.seed(123)
+library(e1071)
+library(ROCR)
+svm_model <- svm(formula = readmitted ~ .,
+                 
+                 data = train_Data,
+                 
+                 type="C-classification",
+                 
+                 kernel = 'linear',
+                 
+                 cost = 10,
+                 
+                 probability = T)
+
+pred <- predict(svm_model, test_Data[,-9], decision.value = T)
+pred.probab <- attr(pred, "decision.value")
+confusionMatrix(pred, test_Data$readmitted)
+pred_con <- predict(ran_for, test_Data[,-9], decision.value = T)
+CC <- caret::confusionMatrix(pred_con, test_Data$readmitted)
+CC
+F1_Score <- 2*(CC$byClass[[5]]* CC$byClass[[6]])/ (CC$byClass[[5]] + CC$byClass[[6]])
+F1_Score
+Linear_SVM[1] <- auc(test_Data$readmitted, pred.probab)
+s <- (roc(test_Data$readmitted, pred.probab))
+plot(s, print.auc=TRUE, max.auc.polygon=TRUE, auc.polygon.col="blue", print.thres=TRUE)
+```
+SVM is not giving us a very high AUC. Lets see if we can improve its performance using the selected features from RF-RFE.
+
+#Performing SVM Using Selected Features
+```{r message=FALSE}
+rec_train_Data <- train_Data[,c( "discharge_disposition_id.2", "number_inpatient", "discharge_disposition_id.11", "number_emergency", "num_medications", "time_in_hospital", "number_outpatient", "admission_source_id.1", "admission_source_id.7", "A1Cresult.Norm", "readmitted")]
+ 
+set.seed(1234)
+svm_model <- svm(formula = readmitted ~ .,
+                 data = rec_train_Data,
+                 type="C-classification",
+                 kernel = 'linear',
+                 probability = T)
+
+pred <- predict(svm_model, test_Data[,-9], decision.value = T)
+pred.probab <- attr(pred, "decision.value")
+confusionMatrix(pred, test_Data$readmitted)
+pred_con <- predict(ran_for, test_Data[,-9], decision.value = T)
+CC <- caret::confusionMatrix(pred_con, test_Data$readmitted)
+CC
+F1_Score <- 2*(CC$byClass[[5]]* CC$byClass[[6]])/ (CC$byClass[[5]] + CC$byClass[[6]])
+F1_Score
+Linear_SVM[2] <- auc(test_Data$readmitted, pred.probab)
+s <- (roc(test_Data$readmitted, pred.probab))
+plot(s, print.auc=TRUE, max.auc.polygon=TRUE, auc.polygon.col="blue", print.thres=TRUE)
+```
+
+As we can see using selected features can improve performance of SVM model by more than 4%. The correlation between features can be the reason we don't get a good result working with the whole dataset. Now I want to investigate two things:
+
+!. If feature extraction helps with prediction power of any of these models.
+
+2. If combination of feature selection and extraction can help!
+
+#Feature Extraction Using Principle Component Analysis (PCA)
+
+As we saw in 'Exploratory Data Analysis" file, almost 80% of the total variance of the data can be explained by just the first 5 PCs we obtained form 8 quantitative features. Now I want to investigate whether replacing quantitaive columns by these PCs can improve the result of these three models.
+
+```{r message=FALSE}
+library("FactoMineR")
+library(factoextra)
+pca_model <- prcomp(train_Data[,1:8],
+                    center = TRUE,
+                    scale. = TRUE) 
+
+train_pca <- predict(pca_model, 
+                     newdata=train_Data[,1:8])
+
+test_pca <- predict(pca_model, 
+                    newdata=test_Data[,1:8])
+
+fviz_eig(pca_model, addlabels = TRUE, ylim = c(0, 50))
+```
+
+
+As you can see the first 5 components can explain more than 82% of the variance in the data. Now I want to see if using these PCs can help us improving predictions. My analysis shows that the optimum number of PC is n = 4. Therfore I am going to replace the quantitative part of the data with these 4 components.
+
+```{r message=FALSE}
+n <- 4
+train_pca_n <- train_pca [,1:n]
+test_pca_n <- test_pca [,1:n]
+```
+Replacing quantitative variables with PCs.
+
+```{r message=FALSE}
+train_Data <- cbind(train_pca_n, train_Data[,-c(1:8)])
+test_Data<- cbind(test_pca_n, test_Data[,-c(1:8)])
+```
+#Performing Random Forest Using PCs
+
+```{r message=FALSE}
+set.seed(123)
+ran_for <- randomForest(formula = readmitted ~ .,
+                        data = train_Data,
+                        ntree = 500 )
+
+pred <- predict(ran_for, test_Data[,-(n+1)], type = 'prob')
+pred_con <- predict(ran_for, test_Data[,-(n+1)], decision.value = T)
+CC <- caret::confusionMatrix(pred_con, test_Data$readmitted)
+CC
+F1_Score <- 2*(CC$byClass[[5]]* CC$byClass[[6]])/ (CC$byClass[[5]] + CC$byClass[[6]])
+F1_Score
+Random_Forest[3] <- auc(test_Data$readmitted, pred[,1])
+s <- (roc(test_Data$readmitted, pred[,1]))
+plot(s, print.auc=TRUE, max.auc.polygon=TRUE, auc.polygon.col="blue", print.thres=TRUE)
+varImp(ran_for)
+varImpPlot(ran_for)
+
+```
+
+Apparently Feature extraction is not helping with Random Forest predictions. 
+
+#Performing Logistic Regression using PCs
+```{r message=FALSE}
+set.seed(123)
+library(ROCR)
+
+logistic_model <- glm(formula =  readmitted ~ .,
+                      family = binomial(link = "logit"),
+                      data = train_Data)
+
+pred <- predict(logistic_model, test_Data[,-(n+1)], type = 'response')
+Logistic_Regression[3] <- auc(test_Data$readmitted, pred)
+s <- (roc(test_Data$readmitted, pred))
+plot(s, print.auc=TRUE, max.auc.polygon=TRUE, auc.polygon.col="blue", print.thres=TRUE)
+```
+
+PCs are not improving logistic regression predictios either.
+
+#Performing SVM using PCA components
+```{r message=FALSE}
+set.seed(1234)
+svm_model <- svm(formula = readmitted ~ .,
+                 data = train_Data,
+                 type="C-classification",
+                 kernel = 'linear',
+                 probability = T)
+
+pred <- predict(svm_model, test_Data[,-(n+1)], decision.value = T)
+pred.probab <- attr(pred, "decision.value")
+CC <- confusionMatrix(pred, test_Data$readmitted)
+CC
+F1_Score <- 2*(CC$byClass[[5]]* CC$byClass[[6]])/ (CC$byClass[[5]] + CC$byClass[[6]])
+F1_Score
+auc(test_Data$readmitted, pred.probab)
+Linear_SVM[3] <- auc(test_Data$readmitted, pred.probab)
+s <- (roc(test_Data$readmitted, pred.probab))
+plot(s, print.auc=TRUE, max.auc.polygon=TRUE, auc.polygon.col="blue", print.thres=TRUE)
+```
+
+Feature extraction can improve prediction of the SVM model.
+
+#Combination of Feature Selection and Extraction
+
+##Using PCs in Recursive Feature Elimination (RFE) Analysis
+
+```{r message=FALSE}
+library(caret)
+library(mlbench)
+library(Hmisc)
+library(randomForest)
+set.seed(1234)
+ctrl <- rfeControl(functions = rfFuncs,
+                   method = "repeatedcv",
+                   repeats = 5,
+                   verbose = FALSE)
+    
+subsets <- c(1:15)
+rfProfile <- rfe(train_Data[,-5], train_Data[,5],
+                 sizes = subsets,
+                 metric = "ROC",
+                 maximize = T,
+                 rfeControl = ctrl)
+
+rfProfile
+predictors(rfProfile)
+
+```
+
+```{r message=FALSE}
+trellis.par.set(caretTheme())
+plot1 <- plot(rfProfile, type = c("g", "o"))
+print(plot1)
+```
+
+#Random Forest with Extracted and Selected Data
+
+```{r message=FALSE}
+
+ rec_train_Data <- train_Data[,c("discharge_disposition_id.2",  "discharge_disposition_id.11", "PC3", "PC1", "admission_source_id.7",       "admission_source_id.1", "admission_type_id.6", "PC4", "readmitted")]
+
+
+set.seed(1234)
+
+ran_for <- randomForest(formula = readmitted ~ .,
+                        
+                        data = rec_train_Data,
+                        
+                        ntree = 500 )
+
+pred <- predict(ran_for, test_Data[,-9], type = 'prob')
+pred_con <- predict(ran_for, test_Data[,-9], decision.value = T)
+CC <- caret::confusionMatrix(pred_con, test_Data$readmitted)
+CC
+F1_Score <- 2*(CC$byClass[[5]]* CC$byClass[[6]])/ (CC$byClass[[5]] + CC$byClass[[6]])
+F1_Score
+Random_Forest[4] <- auc(test_Data$readmitted, pred[,1])
+s <- (roc(test_Data$readmitted, pred[,1]))
+plot(s, print.auc=TRUE, max.auc.polygon=TRUE, auc.polygon.col="blue", print.thres=TRUE)
+varImp(ran_for)
+varImpPlot(ran_for)
+
+```
+Again combination of feature selection and extraction is not helping RF model!
+
+##Logistic Regression with Extracted and Selected Data
+```{r message=FALSE}
+set.seed(123)
+
+logistic_model <- glm(formula =  readmitted ~ .,
+                      
+                      family = binomial(link = "logit"),
+                      
+                      data = rec_train_Data)
+
+
+pred <- predict(logistic_model, test_Data[,-9], type="response")
+Logistic_Regression[4] <- auc(test_Data$readmitted, pred)
+s <- (roc(test_Data$readmitted, pred))
+plot(s, print.auc=TRUE, max.auc.polygon=TRUE, auc.polygon.col="blue", print.thres=TRUE)
+```
+
+Combination of feature extraction and selection improves Logistic Regression a little bit! This can show the importance of feature selection on Logistic Regression.
+
+##SVM with Extracted and Selected Data
+
+```{r message=FALSE}
+set.seed(1234)
+
+svm_model <- svm(formula = readmitted ~ .,
+                 
+                 data = rec_train_Data,
+                 
+                 type="C-classification",
+                 
+                 kernel = 'linear',
+                 
+                 cost = 10,
+                 
+                 probability = T)
+
+pred <- predict(svm_model, test_Data[,-9], decision.value = T)
+pred.probab <- attr(pred, "decision.value")
+CC <- confusionMatrix(pred, test_Data$readmitted)
+CC
+F1_Score <- 2*(CC$byClass[[5]]* CC$byClass[[6]])/ (CC$byClass[[5]] + CC$byClass[[6]])
+F1_Score
+auc(test_Data$readmitted, pred.probab)
+Linear_SVM[4] <- auc(test_Data$readmitted, pred.probab)
+s <- (roc(test_Data$readmitted, pred.probab))
+plot(s, print.auc=TRUE, max.auc.polygon=TRUE, auc.polygon.col="blue", print.thres=TRUE)
+```
+
+Again here the combination of selection and extraction is not helping the prediction. 
+
+#Summary
+You can see the summary of results in the following table.
+```{r message=FALSE}
+Results <- data.frame(Random_Forest, Logistic_Regression, Linear_SVM)
+rownames(Results) <- c("Model", "Feature Selection", "Feature Extraction", "Extraction and Selection")
+Results
+```
+One thing about this dataset is that regardless of the subset of data, simple models work the best with this dataset. Like for SVM linear method with low gamma and cost values, work the best.For RF number of trees not more that 500 has the best performance.
+
+Feature selection can improve performance of all models.
+
+Apparently Feature extraction is not helping with Random Forest and Logistic Regression predictions. For RF method the reason could be that we are missing some information here. Random Forest is a powerful method that can work pretty well in the presence of some correlated features. Therefore we could expect that losing some information through PCA can lead to worse result for RF.
+
+It is interesting that PCs can improve the prediction power of SVM by more than 8%. This shows the sensitivity of SVM model to correlated features. 
+
+As we can see both process of extraction and selection does not help Random Forest model. In previous secction we saw that selection alone can improve predictions of RF but extraction alone or in combination with selection does not improve the predictions. I think this is because we lose information in the process of extraction.
+
+Combination of feature extraction and selection is not helping SVM model.  One reason could be I used RF method in process of RFE. That could be a reason that SVM is not performing very well! Maybe if there was a way to do feature selection with SVM, those selected features could improve SVM performance!
+
+
+#References
+
+http://www.cioslab.vcu.edu/
+
+https://usf-mshi.slack.com/files/U82DK0HC1/FAMS6EZ7F/screen_shot_2018-05-10_at_10.18.16_am.png
+
+https://www.hcup-us.ahrq.gov/reports/statbriefs/sb230-7-Day-Versus-30-Day-Readmissions.jsp
+
+https://usf-mshi.slack.com/files/U82DK0HC1/FAMN2UDNW/screen_shot_2018-05-10_at_10.14.23_am.png
+
+https://www.hindawi.com/journals/bmri/2014/781670/
+
+
